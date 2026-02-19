@@ -368,9 +368,12 @@ handlers(global = TRUE)
 handlers("txtprogressbar")  # simple clean progress bar
 
 beta <- c(0,0,0)
+#beta<- c(0,-0.2,0.7)
+#beta<- c(0,-0.2,0.7)
+#beta<- c(0,-0.2,0.7)
 Ns <- c(100,200)
 rhos <- c(0.75,0.80)
-it <- 100
+it <- 1000
 
 
 
