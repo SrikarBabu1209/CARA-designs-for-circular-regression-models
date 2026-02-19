@@ -1,21 +1,21 @@
 rm(list=ls())
 
-############################################################
-# Libraries
-############################################################
+
+#Libraries(install packages if required)
+
 library(CircStats)
-library(parallel)
-library(doParallel)
 library(foreach)
 library(doRNG)
 library(progressr)
+library(doFuture)
+library(future)
 
+registerDoFuture()
+plan(multisession, workers = parallel::detectCores() - 1)
+handlers(global = TRUE)
+handlers("progress")
 
-
-
-############################################################
-# Probability Function
-############################################################
+#Probability Function
 
 f=function(me,ro){
   delta=pi/4
@@ -36,9 +36,8 @@ f=function(me,ro){
   return(l1)
 }
 
-############################################################
-# CARA PROCEDURE
-############################################################
+#CARA PROCEDURE
+
 allocation<-function(iniala=10,rtrue,rho=0.92,
                      rho1=0.8,N=200){
   
@@ -139,9 +138,8 @@ allocation<-function(iniala=10,rtrue,rho=0.92,
   return(cbind(tx,trt,ty))
 }
 
-############################################################
-# CR PROCEDURE
-############################################################
+#CR PROCEDURE
+
 allocation.CR<-function(iniala=10,rtrue,rho=0.92,
                         rho1=0.8,N=200){
   
@@ -193,9 +191,8 @@ allocation.CR<-function(iniala=10,rtrue,rho=0.92,
   return(cbind(tx,trt,ty))
 }
 
-############################################################
-# LRT
-############################################################
+#LRT
+
 LRT <- function(data){
   
   tx=data[,1]; trt=data[,2]; ty=data[,3]
@@ -248,9 +245,8 @@ LRT <- function(data){
 
 LRT.CR <- function(data){ return(LRT(data)) }
 
-############################################################
-# Parallel Simulation Functions
-############################################################
+#Simulation Functions
+
 AP <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
   
   with_progress({
@@ -259,7 +255,6 @@ AP <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     
     prop <- foreach(i=1:it,.combine=rbind,
                     .packages="CircStats",
-                    .export=c("allocation","cov.type","f"),
                     .options.RNG=100) %dorng% {
                       
                       d <- allocation(rtrue=rtrue,rho=rho,rho1=rho1,N=N)
@@ -273,6 +268,7 @@ AP <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     colMeans(prop)
   })
 }
+
 AP.CR <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
   
   with_progress({
@@ -281,7 +277,6 @@ AP.CR <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     
     prop <- foreach(i=1:it,.combine=rbind,
                     .packages="CircStats",
-                    .export=c("allocation.CR","cov.type"),
                     .options.RNG=200) %dorng% {
                       
                       d <- allocation.CR(rtrue=rtrue,rho=rho,rho1=rho1,N=N)
@@ -295,6 +290,7 @@ AP.CR <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     colMeans(prop)
   })
 }
+
 pow <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
   
   with_progress({
@@ -303,7 +299,6 @@ pow <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     
     re <- foreach(i=1:it,.combine=c,
                   .packages="CircStats",
-                  .export=c("allocation","LRT","cov.type","f"),
                   .options.RNG=300) %dorng% {
                     
                     d <- allocation(rtrue=rtrue,rho=rho,rho1=rho1,N=N)
@@ -317,6 +312,7 @@ pow <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     mean(re)
   })
 }
+
 pow.CR <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
   
   with_progress({
@@ -325,7 +321,6 @@ pow.CR <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     
     re <- foreach(i=1:it,.combine=c,
                   .packages="CircStats",
-                  .export=c("allocation.CR","LRT.CR","cov.type"),
                   .options.RNG=400) %dorng% {
                     
                     d <- allocation.CR(rtrue=rtrue,rho=rho,rho1=rho1,N=N)
@@ -339,6 +334,7 @@ pow.CR <- function(it=1000,rtrue,rho=0.8,rho1=0.8,N=200){
     mean(re)
   })
 }
+
 error <- function(it=1000,rtrue0=0,rho=0.8,rho1=0.8,N=200){
   r0=c(rtrue0,rtrue0,rtrue0)
   pow(it,r0,rho,rho1,N)
@@ -349,33 +345,17 @@ error.CR <- function(it=1000,rtrue0=0,rho=0.8,rho1=0.8,N=200){
   pow.CR(it,r0,rho,rho1,N)
 }
 
-
-############################################################
-# Parallel Setup (Reproducible)
-############################################################
-ncores <- detectCores() - 1
-cl <- makeCluster(ncores)
-registerDoParallel(cl)
-
-
 set.seed(12345)
 cov.type <- "wrapped"
 
-clusterExport(cl, c("allocation","allocation.CR","LRT","LRT.CR","f","cov.type"))
+#beta <- c(0,0,0)
+#beta<- c(0,-0.2,0.7)
+beta<- c(0,-0.1,-0.2)
+#beta<- c(0,-0.2,-0.2)
 
-cat("Using", ncores, "cores\n")
-handlers(global = TRUE)
-handlers("txtprogressbar")  # simple clean progress bar
-
-beta <- c(0,0,0)
-#beta<- c(0,-0.2,0.7)
-#beta<- c(0,-0.2,0.7)
-#beta<- c(0,-0.2,0.7)
 Ns <- c(100,200)
 rhos <- c(0.75,0.80)
 it <- 1000
-
-
 
 results_wrapped <- list()
 
@@ -413,7 +393,7 @@ for(Nval in Ns){
 }
 
 cov.type <- "uniform"
-clusterExport(cl, "cov.type")
+
 results_uniform <- list()
 
 for(Nval in Ns){
@@ -451,9 +431,3 @@ for(Nval in Ns){
 
 print(results_wrapped)
 print(results_uniform)
-
-############################################################
-# Stop Cluster
-############################################################
-stopCluster(cl)
-cat("Parallel cluster stopped.\n")
