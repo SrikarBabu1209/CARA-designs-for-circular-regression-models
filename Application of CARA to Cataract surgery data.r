@@ -1,249 +1,362 @@
-install.packages(c("readxl", "dplyr", "circular", "CircStats"))
+rm(list = ls())
+
 library(readxl)
 library(dplyr)
 library(circular)
-library(CircStats)
-
-
-#Importing and Cleaning Raw Excel Sheets
+library(numDeriv)
 
 clean_sheet <- function(path, sheetname, trt_label){
-  raw <- read_excel(path, sheet = sheetname, col_names = FALSE)
   
-  #Extracting header rows
+  raw <- read_excel(path,sheet = sheetname,col_names = FALSE)
+  
+  #Header rows
   h1 <- as.character(unlist(raw[3, ]))
   h2 <- as.character(unlist(raw[4, ]))
   
-  cn <- ifelse(is.na(h1) | h1 == "", h2, paste(h1, h2, sep = "_"))
+  #Create names
+  cn <- ifelse(is.na(h1) | h1 == "",h2,paste(h1, h2, sep = "_"))
   
-  #Removing raw header rows
-  dat <- raw[-c(1, 2, 3, 4), ]
+  #Remove header rows
+  dat <- raw[-c(1,2,3,4), ]
   colnames(dat) <- cn
   rownames(dat) <- NULL
   
-  #Adding treatment label
+  #Add treatment
   dat$treatment <- trt_label
   return(dat)
 }
-
-
-cat("Select Excel data file in the pop-up window...\n")
 file_path <- file.choose()
-
 SICS  <- clean_sheet(file_path, "SICS (A)", 1)
+
 SNARE <- clean_sheet(file_path, "SNARE (B)", 2)
+
 CONV  <- clean_sheet(file_path, "CONV (C)", 3)
+
 TORS  <- clean_sheet(file_path, "TORS (D)", 4)
 
-#Binding all groups
 all_dat <- bind_rows(SICS, SNARE, CONV, TORS)
+dim(all_dat)
 
 
-#Transmute and Clean Primary Variables
 cataract <- all_dat %>%
+  
   transmute(
+    
     patient_id = PID,
-    treatment  = factor(treatment, levels = c(1, 2, 3, 4), labels = c("SICS", "SNARE", "CONV", "TORS")),
-    age        = as.numeric(Age),
-    sex        = Sex,
-    surgeon    = Surgeon,
-    eye        = Eye,
+    
+    treatment = factor(treatment,levels = c(1,2,3,4),labels = c("SICS","SNARE","CONV","TORS")),
+    
+    age = as.numeric(Age),
+    
+    sex = Sex,
+    
+    surgeon = Surgeon,
+    
+    eye = Eye,
+    
     #Pre-operative astigmatism
-    preop_k    = as.numeric(`K...14`),
+    
+    preop_k = as.numeric(`K...14`),
+    
     preop_axis = as.numeric(`Axis...15`),
+    
     #Surgery induced astigmatism (1 Month)
-    sia_mag    = as.numeric(`SIA_K...36`),
-    sia_axis   = as.numeric(`AXIS...37`)
-  )
+    
+    sia_mag = as.numeric(`SIA_K...36`),
+    
+    sia_axis = as.numeric(`AXIS...37`))
 
-#Removing cases with missing values in key circular orientations
+names(cataract)
+head(cataract)
+summary(cataract)
+table(cataract$treatment)
+any(is.na(cataract))
+
+
+#Cleaning data
+
 cataract_clean <- cataract %>%
-  filter(
-    !is.na(preop_axis),
-    !is.na(sia_axis),
-    !is.na(sia_mag)
-  ) %>%
+  
+  filter(!is.na(age),!is.na(preop_k),!is.na(preop_axis),!is.na(sia_mag),!is.na(sia_axis),!is.na(treatment))
+
+#Converting Treatment to Factor
+
+cataract_clean$treatment <- as.factor(cataract_clean$treatment)
+
+#Summary Table
+
+summary_table <- data.frame(
+  
+  Variable = c("Age","Preop K","Preop Axis","SIA Magnitude","SIA Axis"),
+  Mean = c(mean(cataract_clean$age),mean(cataract_clean$preop_k),mean(cataract_clean$preop_axis),mean(cataract_clean$sia_mag),mean(cataract_clean$sia_axis)),
+  SD = c(sd(cataract_clean$age),sd(cataract_clean$preop_k),sd(cataract_clean$preop_axis),sd(cataract_clean$sia_mag),sd(cataract_clean$sia_axis))
+  )
+
+summary_table[, -1] <- round(summary_table[, -1],3)
+
+cat("\n========================================\n")
+cat("Summary Table\n")
+cat("========================================\n")
+
+print(summary_table)
+
+
+#Double Angle Transformation
+
+cataract2 <- cataract_clean %>%
   mutate(
-    #Converting axial angles [0, 180) to doubled angles [0, 360)
-    preop_axis2 = (2 * preop_axis) %% 360,
-    sia_axis2   = (2 * sia_axis) %% 360,
-    
-    #Defining circular class objects
-    preop_circ  = circular(preop_axis2, units = "degrees", modulo = "2pi"),
-    sia_circ    = circular(sia_axis2, units = "degrees", modulo = "2pi"),
-    
-    x_rad       = as.numeric(preop_circ) * pi / 180,
-    y_rad       = as.numeric(sia_circ) * pi / 180,
-    
-    #Standardizing linear covariate (Age) to align with simulation specifications
-    age_std     = (age - mean(age)) / sd(age)
-  )
+    preop_axis2 =(2 * preop_axis) %% 360,
+    sia_axis2 =(2 * sia_axis) %% 360)
 
 
-#Exploratory Circular Data Analysis (EDA)
-eda_summary <- cataract_clean %>%
-  group_by(treatment) %>%
-  summarise(
-    n             = n(),
-    mean_preop    = mean(preop_circ),
-    mean_sia      = mean(sia_circ),
-    rho_preop     = rho.circular(preop_circ),
-    rho_sia       = rho.circular(sia_circ),
-    .groups       = "drop"
-  )
-print(eda_summary)
+#Circular Variables
+
+preop_circ <- circular(cataract2$preop_axis2,units = "degrees",modulo = "2pi")
+sia_circ <- circular(cataract2$sia_axis2,units = "degrees",modulo = "2pi")
 
 
-#Circular-Circular Möbius Regression Fitting
+#Converting to Radians
+theta_x <- as.numeric(conversion.circular(preop_circ,units = "radians"))
+theta_y <- as.numeric(conversion.circular(sia_circ,units = "radians"))
 
-#Using polar coordinates to enforce constraint r = |beta| < 1
-mobius_polar_loglik <- function(params, x, y) {
-  r    <- params[1]
-  phi  <- params[2]
-  rho  <- 1 / (1 + exp(-params[3])) #Logit link function to force rho in [0, 1)
+#Complex Representation
+
+X <- exp(1i * theta_x)
+Y <- exp(1i * theta_y)
+
+#Standardizing Covariates
+
+cataract2$age_std <- as.numeric(scale(cataract2$age))
+cataract2$k_std <- as.numeric(scale(cataract2$preop_k))
+
+invlogit <- function(x){1 / (1 + exp(-x))}
+
+
+#Wrapped Cauchy Negative Loglikelihood
+
+wc_negloglik <- function(par, X, Y){
+  r_raw   <- par[1]
+  phi     <- par[2]
+  rho_raw <- par[3]
+  r <- 0.75 * invlogit(r_raw)
+  rho <- 0.80 * invlogit(rho_raw)
   beta <- r * exp(1i * phi)
-  X_complex <- exp(1i * x)
-  eta <- (X_complex + beta) / (1 + Conj(beta) * X_complex)
-  mu  <- Arg(eta) %% (2 * pi)
+  eta <- (X + beta) / (1 + Conj(beta) * X)
+  mu <- Arg(eta)
+  y <- Arg(Y)
   
-  log_dens <- log(1 - rho^2) - log(2 * pi) - log(1 + rho^2 - 2 * rho * cos(y - mu))
-  return(-sum(log_dens))
+  eps <- 1e-8
+
+  ll <- sum(log(1 - rho^2 + eps)-log(1 +rho^2 -2 * rho * cos(y - mu) +eps))
+  ridge <- 0.20 * r^2
+  return(  -(ll - ridge))
 }
 
-fit_mobius_group <- function(data_sub) {
-  #Constrained optimization using L-BFGS-B (r bounded in [0, 0.95] to prevent boundary failure)
-  lower_bounds <- c(0, 0, -5)
-  upper_bounds <- c(0.95, 2 * pi, 5)
-  init_val     <- c(0.2, pi, 0)
-  
-  opt <- optim(
-    init_val, 
-    mobius_polar_loglik, 
-    x = data_sub$x_rad, 
-    y = data_sub$y_rad, 
-    method = "L-BFGS-B",
-    lower = lower_bounds,
-    upper = upper_bounds,
-    hessian = TRUE
-  )
-  
-  r_est    <- opt$par[1]
-  phi_est  <- opt$par[2]
-  beta_est <- r_est * exp(1i * phi_est)
-  rho_est  <- 1 / (1 + exp(-opt$par[3]))
-  
-  #Calculating per-observation variance parameter (xi) using the localized Hessian
-  n_k <- nrow(data_sub)
-  hessian_sub <- opt$hessian[1:2, 1:2]
-  
-  if (all(eigen(hessian_sub)$values > 0)) {
-    info_beta <- solve(hessian_sub / n_k)
-    xi_est    <- mean(diag(info_beta))
-  } else {
-    xi_est    <- 1 - rho_est  #Falling back to circular variance if boundary optimization is unstable
-  }
-  
-  return(list(beta = beta_est, r = r_est, phi = phi_est, rho = rho_est, xi = xi_est))
+#Fitting CIRCULAR-CIRCULAR MODEL
+
+fit_wc <- optim(par = c(0,0,0),fn = wc_negloglik,X = X,Y = Y,method = "BFGS",control = list(maxit = 3000,reltol = 1e-8))
+
+r_hat <- 0.75 * invlogit(fit_wc$par[1])
+
+phi_hat <- fit_wc$par[2]
+
+rho_hat <- 0.80 * invlogit(fit_wc$par[3])
+
+beta_hat <- r_hat * exp(1i * phi_hat)
+
+
+#Circular-Circular Results
+
+cc_results <- data.frame(Parameter = c("Modulus","Argument","Rho"),Estimate = c(Mod(beta_hat),Arg(beta_hat),rho_hat))
+
+cc_results$Estimate <- round(cc_results$Estimate,4)
+
+cat("\n========================================\n")
+cat("Circular-Circular Model\n")
+cat("========================================\n")
+
+print(cc_results)
+
+eta_hat <- (X + beta_hat) / (1 + Conj(beta_hat) * X)
+mu_hat <- Arg(eta_hat)
+
+
+residuals_wc <- atan2(sin(theta_y - mu_hat),cos(theta_y - mu_hat))
+
+res_num <- as.numeric(residuals_wc)
+
+residual_table <- data.frame(Statistic = c("Mean","SD","Circular Concentration"),Value = c(mean(res_num),sd(res_num),mean(cos(res_num))))
+
+residual_table$Value <- round(residual_table$Value,4)
+
+cat("\n========================================\n")
+cat("Residual Diagnostics\n")
+cat("========================================\n")
+
+print(residual_table)
+
+#Linear-Circular Negative Loglikelihood
+
+lc_negloglik <- function(par,x1,x2,y){
+  mu0     <- par[1]
+  b1      <- par[2]
+  b2      <- par[3]
+  rho_raw <- par[4]
+  rho <- 0.75 * invlogit(rho_raw)
+  eta <- b1 * x1 +b2 * x2
+  mu <- mu0 + 2 * atan(eta)
+  eps <- 1e-8
+  ll <- sum(log(1 - rho^2 + eps)-log(1 +rho^2 -2 * rho * cos(y - mu) +eps))
+  ridge <- 0.20 * (b1^2 + b2^2)
+ return(-(ll - ridge))
 }
 
-treatments     <- levels(cataract_clean$treatment)
-mobius_results <- list()
+#Fitting Global Model
 
-for (trt in treatments) {
-  sub_data <- filter(cataract_clean, treatment == trt)
-  fit <- fit_mobius_group(sub_data)
-  mobius_results[[trt]] <- fit
-  cat(sprintf("Treatment: %-5s | Beta: %7.4f + %7.4fi (Mod: %.4f) | Rho: %.4f | Xi (Precision): %.4f\n", 
-              trt, Re(fit$beta), Im(fit$beta), Mod(fit$beta), fit$rho, fit$xi))
-}
+fit_lc <- optim(par = c(0,0,0,0),
+  fn = lc_negloglik,
+  x1 = cataract2$age_std,
+  x2 = cataract2$k_std,
+  y = theta_y,
+  method = "BFGS",
+  control = list(maxit = 3000,reltol = 1e-8))
+
+mu0_hat <- fit_lc$par[1]
+b1_hat <- fit_lc$par[2]
+b2_hat <- fit_lc$par[3]
+rho_lc <- 0.75 * invlogit(fit_lc$par[4])
+
+lc_results <- data.frame(Parameter = c("mu0","b1","b2","rho"),Estimate = c(mu0_hat,b1_hat,b2_hat,rho_lc))
+
+lc_results$Estimate <- round(lc_results$Estimate,4)
+
+cat("\n========================================\n")
+cat("Global Linear-Circular Model\n")
+cat("========================================\n")
+
+print(lc_results)
 
 
-#Linear-Circular Regression Model Fitting
+treatment_results <- data.frame()
+xi_vec <- numeric()
 
-#Joint log-likelihood
-lin_circ_loglik_real <- function(params, x, y, trt_vec) {
-  #params: beta_1, beta_2, beta_3, beta_4, mu0, logit_rho
-  beta <- params[1:4]
-  mu0  <- params[5]
-  rho  <- 1 / (1 + exp(-params[6]))
+for(trt in levels(cataract2$treatment)){
+  dat_trt <- cataract2[cataract2$treatment == trt,]
+  if(nrow(dat_trt) < 10){next}
   
-  ll <- 0
-  for (i in 1:length(y)) {
-    mu_i <- (mu0 + 2 * atan(beta[trt_vec[i]] * x[i])) %% (2 * pi)
-    ll <- ll + log(1 - rho^2) - log(1 + rho^2 - 2 * rho * cos(y[i] - mu_i))
-  }
-  return(-ll)
+  y_trt <- as.numeric(conversion.circular(circular(dat_trt$sia_axis2,units = "degrees",modulo = "2pi"),units = "radians"))
+  
+  fit_trt <- optim(par = c(0,0,0,0),
+    fn = lc_negloglik,
+    x1 = dat_trt$age_std,
+    x2 = dat_trt$k_std,
+    y = y_trt,
+    method = "BFGS",
+    control = list(maxit = 2000))
+  
+  mu0_t <- fit_trt$par[1]
+  b1_t <- fit_trt$par[2]
+  b2_t <- fit_trt$par[3]
+  rho_t <- 0.75 * invlogit(fit_trt$par[4])
+
+    temp_table <- data.frame(Treatment = trt,mu0 = mu0_t,b1 = b1_t,b2 = b2_t,rho = rho_t)
+  
+  treatment_results <- rbind(treatment_results,temp_table)
+  
+  H <- hessian(func = lc_negloglik,x = fit_trt$par,x1 = dat_trt$age_std,x2 = dat_trt$k_std,y = y_trt)
+  
+  H <- H + diag(0.05,nrow(H))
+  eigvals <- Re(eigen(H)$values)
+  
+  if(any(eigvals <= 0)){
+    xi_val <- 1} else {
+    vcov_mat <- solve(H)
+    xi_val <- mean(diag(vcov_mat))}
+  
+  #Stabilization
+  xi_val <- median(c(0.25, xi_val, 5))
+  xi_vec[trt] <- xi_val
 }
 
-x_val   <- cataract_clean$age_std
-y_val   <- cataract_clean$y_rad
-trt_val <- as.numeric(cataract_clean$treatment) #SICS=1, SNARE=2, CONV=3, TORS=4
+treatment_results[, -1] <- round(treatment_results[, -1],4)
 
-#Setting stable starting parameters for joint optimization
-init_val <- c(rep(0, 4), mean(y_val), 0)
+cat("\n========================================\n")
+cat("Treatmentwise Linear-Circular Fits\n")
+cat("========================================\n")
 
-op <- optim(
-  init_val, 
-  lin_circ_loglik_real, 
-  x = x_val, 
-  y = y_val, 
-  trt_vec = trt_val,
-  method = "L-BFGS-B",
-  lower = c(rep(-2, 4), 0, -5),
-  upper = c(rep(2, 4), 2 * pi, 5),
-  hessian = TRUE
-)
+print(treatment_results)
 
-#Extracting joint parameters
-beta_est <- op$par[1:4]
-mu0_est  <- op$par[5]
-rho_est  <- 1 / (1 + exp(-op$par[6]))
+xi_df <- data.frame(Treatment = names(xi_vec),xi_k = as.numeric(xi_vec))
+xi_df$xi_k <- round(xi_df$xi_k,4)
 
-for (k in 1:4) {
-  cat(sprintf("Treatment: %-5s | Intercept (mu0): %.4f rad | Slope (Beta): %7.4f | Global Rho: %.4f\n", 
-              treatments[k], mu0_est, beta_est[k], rho_est))
-}
+cat("\n========================================\n")
+cat("Asymptotic Precision\n")
+cat("========================================\n")
+
+print(xi_df)
+
+#Failure Probabilities
+delta <- pi / 2
+failure_tab <- cataract2 %>%
+  mutate(y_rad = theta_y,
+    failure =abs(y_rad) > delta) %>%
+  group_by(treatment) %>%
+  summarise(qk = mean(failure))
+
+failure_tab <- as.data.frame(failure_tab)
 
 
-#CARA Adaptive Target Allocation Estimation
+colnames(failure_tab)[1] <- "Treatment"
 
-q_fun_exact <- function(mu, rho) {
-  delta <- pi / 4 #clinical window threshold (45 degrees)
-  f <- function(theta) {
-    (1 - rho^2) / (2 * pi * (1 + rho^2 - 2 * rho * cos(theta - mu)))
-  }
-  integrate(f, lower = delta, upper = 2 * pi - delta)$value
-}
+failure_tab$qk <- pmax(failure_tab$qk,0.05)
 
-#Extracting parameter variances (Xi) from the joint parameter Hessian
-H <- (op$hessian + t(op$hessian)) / 2
-V <- tryCatch(
-  solve(H),
-  error = function(e) diag(1, 6)
-)
-Vdiag <- pmax(diag(V)[1:4], 1e-6) #Variance factor for treatment effects (xi_k)
+failure_tab$qk <- round(failure_tab$qk,4)
 
-#Computing analytical failure probability q_k at standard baseline (x = 0)
-q_est <- numeric(4)
-for (k in 1:4) {
-  mu_predicted <- (mu0_est + 2 * atan(beta_est[k] * 0)) %% (2 * pi)
-  q_est[k]     <- q_fun_exact(mu_predicted, rho_est)
-}
-q_est <- pmax(q_est, 1e-6)
+cat("\n========================================\n")
+cat("Failure Probabilities\n")
+cat("========================================\n")
 
-#CARA allocation calculation: target allocation is proportional to sqrt(xi / q)
-p_raw   <- sqrt(Vdiag / q_est)
-pi_star <- p_raw / sum(p_raw)
+print(failure_tab)
 
-#Organizing findings into table format
-results_synchronized <- data.frame(
-  Treatment            = treatments,
-  Beta_Estimate        = round(beta_est, 4),
-  Failure_Prob_qk      = round(q_est, 4),
-  Precision_Factor_xik = round(Vdiag, 4),
-  Target_Allocation_pi = round(pi_star, 4),
-  CR_Allocation        = 0.2500
-)
+alloc_tab <- merge(failure_tab,xi_df,by = "Treatment")
 
-print(results_synchronized)
+#Stabilized CARA Allocation
+
+alloc_tab$weight <- sqrt(alloc_tab$xi_k / alloc_tab$qk)
+
+#Smooth Shrinkage
+
+alloc_tab$weight <- sqrt(alloc_tab$weight)
+
+alloc_tab$pi_star <- alloc_tab$weight / sum(alloc_tab$weight)
+
+alloc_tab$qk <- round(alloc_tab$qk,4)
+
+alloc_tab$xi_k <- round(alloc_tab$xi_k,4)
+
+alloc_tab$weight <- round(alloc_tab$weight,4)
+
+alloc_tab$pi_star <- round(alloc_tab$pi_star,4)
+
+cat("\n========================================\n")
+cat("Stabilized CARA Allocation\n")
+cat("========================================\n")
+
+print(alloc_tab[order(-alloc_tab$pi_star),])
+
+final_summary <- data.frame(Quantity = c("CC Modulus","CC Rho","LC Rho","Residual Concentration"),
+  Value = c(Mod(beta_hat),rho_hat,rho_lc,mean(cos(res_num))))
+
+final_summary$Value <- round(final_summary$Value,4)
+
+cat("\n========================================\n")
+cat("Final Summary\n")
+cat("========================================\n")
+
+print(final_summary)
+
+cat("\n========================================\n")
+cat("ANALYSIS COMPLETE\n")
+cat("========================================\n")
+  
 
