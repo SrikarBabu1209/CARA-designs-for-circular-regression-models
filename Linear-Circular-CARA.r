@@ -72,7 +72,7 @@ allocation <- function(iniala=10, beta.true,
     q <- sapply(muhat, q_fun, rho = op$par[4])
     q <- pmax(q, 1e-6)
     
-    #Variance (Fisher info inverse)
+    #Approximate covariance matrix from inverse Hessian
     H <- (op$hessian + t(op$hessian))/2
     
     V <- tryCatch(
@@ -182,7 +182,7 @@ LRT <- function(data){
 
 #Simulation Functions
 
-AP <- function(it=500, beta.true, rho=0.8,
+AP <- function(it=1000, beta.true, rho=0.8,
                sigma.x=1, N=200){
   
   with_progress({
@@ -206,7 +206,7 @@ AP <- function(it=500, beta.true, rho=0.8,
   })
 }
 
-AP.CR <- function(it=500, beta.true, rho=0.8,
+AP.CR <- function(it=1000, beta.true, rho=0.8,
                   sigma.x=1, N=200){
   
   with_progress({
@@ -230,7 +230,7 @@ AP.CR <- function(it=500, beta.true, rho=0.8,
   })
 }
 
-pow <- function(it=500, beta.true, rho=0.8,
+pow <- function(it=1000, beta.true, rho=0.8,
                 sigma.x=1, N=200){
   
   with_progress({
@@ -254,7 +254,7 @@ pow <- function(it=500, beta.true, rho=0.8,
   })
 }
 
-pow.CR <- function(it=500, beta.true, rho=0.8,
+pow.CR <- function(it=1000, beta.true, rho=0.8,
                    sigma.x=1, N=200){
   
   with_progress({
@@ -278,7 +278,7 @@ pow.CR <- function(it=500, beta.true, rho=0.8,
   })
 }
 
-size <- function(it=500, rho=0.8,
+size <- function(it=1000, rho=0.8,
                  sigma.x=1, N=200){
   
   pow(it=it,
@@ -288,7 +288,7 @@ size <- function(it=500, rho=0.8,
       N=N)
 }
 
-size.CR <- function(it=500, rho=0.8,
+size.CR <- function(it=1000, rho=0.8,
                     sigma.x=1, N=200){
   
   pow.CR(it=it,
@@ -299,10 +299,14 @@ size.CR <- function(it=500, rho=0.8,
 }
 
 #Test Cases
-beta <- c(0, -0.1, 0.2)
+beta <- c(0,-0.2,0.2)
+#beta <- c(0,-0.2,0.5)
+#beta <- c(-1,0,2)
+#beta <- c(-1, 0, 1)
+#beta <- c(-0.5,0,1.5)
 Ns <- c(100, 200)
 rhos <- c(0.75, 0.80)
-it <- 200
+it <- 1000
 results_LC <- list()
 set.seed(123)
 for(Nval in Ns){
@@ -377,4 +381,3 @@ results_LC <- lapply(results_LC, function(x){
 })
 
 print(results_LC)
-
